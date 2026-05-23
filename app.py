@@ -1,15 +1,9 @@
 """
-Campus Shared Umbrella LINE Bot — v4 (Ultimate DSRM Instantiation)
-Features:
-  • Fixed .env.txt loading and LINE v3 image download bug.
-  • Added 'My Status' & 'Task Board' Flex Messages.
-  • Registration FSM upgraded: Name -> Department -> ID Card -> Optimistic Release (Idle).
-  • Repair FSM added: 報修 -> Select Station -> Upload Photo -> DB.
-  • Web Dashboard Expanded:
-    - Section D: Registration Verification (with duplicate name warning).
-    - Section E: Repair Requests Management.
+Campus Shared Umbrella LINE Bot — v5
+Redesigned admin dashboard with charts, schematic map, station CRUD.
 """
 
+import json
 import os
 import re
 import sqlite3
@@ -19,8 +13,8 @@ from datetime import datetime
 
 import cv2
 from flask import (
-    Flask, abort, redirect, render_template_string,
-    request, session, url_for,
+    Flask, abort, jsonify, redirect, render_template,
+    request, session, url_for, Response,
 )
 
 # 👇 1. 環境變數讀取修復
@@ -67,11 +61,10 @@ handler        = WebhookHandler(CHANNEL_SECRET)
 DB_PATH = "umbrella_v4.db"
 
 def get_conn():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
-# 👇 2. 資料庫結構擴充 (加入系所、審核狀態與報修表格)
 def init_db():
     with get_conn() as conn:
         conn.executescript("""
@@ -92,7 +85,11 @@ def init_db():
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
             name           TEXT UNIQUE,
             umbrella_count INTEGER DEFAULT 0,
-            image_url      TEXT
+            image_url      TEXT,
+            map_x          REAL    DEFAULT 50,
+            map_y          REAL    DEFAULT 50,
+            max_capacity   INTEGER DEFAULT 10,
+            is_active      INTEGER DEFAULT 1
         );
         CREATE TABLE IF NOT EXISTS repairs (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -103,13 +100,25 @@ def init_db():
             report_time    TEXT
         );
         """)
+        # 舊資料庫 schema migration（新增欄位）
+        for col_sql in [
+            "ALTER TABLE stations ADD COLUMN map_x        REAL    DEFAULT 50",
+            "ALTER TABLE stations ADD COLUMN map_y        REAL    DEFAULT 50",
+            "ALTER TABLE stations ADD COLUMN max_capacity INTEGER DEFAULT 10",
+            "ALTER TABLE stations ADD COLUMN is_active    INTEGER DEFAULT 1",
+        ]:
+            try:
+                conn.execute(col_sql)
+            except Exception:
+                pass
+
         if conn.execute("SELECT COUNT(*) FROM stations").fetchone()[0] == 0:
             conn.executemany(
-                "INSERT INTO stations (name, umbrella_count, image_url) VALUES (?,?,?)",
+                "INSERT INTO stations (name, umbrella_count, map_x, map_y, max_capacity) VALUES (?,?,?,?,?)",
                 [
-                    ("圖書館",   8, "https://example.com/library.jpg"),
-                    ("活動中心", 5, "https://example.com/activity.jpg"),
-                    ("學生宿舍", 3, "https://example.com/dorm.jpg"),
+                    ("圖書館",   8, 35, 28, 12),
+                    ("活動中心", 5, 16, 65, 10),
+                    ("學生宿舍", 3, 35, 82, 8),
                 ],
             )
 
@@ -222,176 +231,6 @@ def download_image(message_id, user_id):
     return image_path
 
 # ─────────────────────────────────────────────────────────────────────────────
-# HTML templates (Dashboard 擴充區塊 D 與 E)
-# ─────────────────────────────────────────────────────────────────────────────
-LOGIN_HTML = """
-<!doctype html>
-<html lang="zh-TW">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>管理員登入 — 校園共享雨傘</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-  <style>body{background:linear-gradient(135deg,#1a3c5e 0%,#2980b9 100%);min-height:100vh;} .login-card{max-width:400px;border-radius:1rem;} .umbrella-icon{font-size:3rem;color:#2980b9;}</style>
-</head>
-<body class="d-flex align-items-center justify-content-center">
-  <div class="card shadow-lg p-4 login-card w-100 mx-3">
-    <div class="text-center mb-3"><i class="bi bi-umbrella-fill umbrella-icon"></i><h4 class="mt-2 fw-bold">校園共享雨傘</h4></div>
-    {% if error %}<div class="alert alert-danger py-2">{{ error }}</div>{% endif %}
-    <form method="post">
-      <div class="mb-3">
-        <label class="form-label fw-semibold">管理員密碼</label>
-        <div class="input-group">
-          <span class="input-group-text"><i class="bi bi-lock-fill"></i></span>
-          <input type="password" name="password" class="form-control" placeholder="請輸入密碼" autofocus required>
-        </div>
-      </div>
-      <button type="submit" class="btn btn-primary w-100 fw-bold">登入</button>
-    </form>
-  </div>
-</body>
-</html>
-"""
-
-DASHBOARD_HTML = """
-<!doctype html>
-<html lang="zh-TW">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>管理後台 — 校園共享雨傘</title>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-  <style>
-    body{background-color:#f0f4f8;} .section-card{border-radius:.75rem;border:none;box-shadow:0 2px 12px rgba(0,0,0,.08);}
-    .section-header{border-radius:.75rem .75rem 0 0;padding:1rem 1.25rem;color:#fff;font-weight:600;}
-    .header-a{background:linear-gradient(90deg,#1a6e3c,#27ae60);} .header-b{background:linear-gradient(90deg,#154776,#2980b9);}
-    .header-c{background:linear-gradient(90deg,#6b2d00,#d35400);} .header-d{background:linear-gradient(90deg,#8e44ad,#9b59b6);}
-    .header-e{background:linear-gradient(90deg,#c0392b,#e74c3c);}
-    .flash-msg{position:fixed;top:70px;right:20px;z-index:9999;min-width:280px;}
-  </style>
-</head>
-<body>
-
-<nav class="navbar navbar-dark bg-dark px-3 sticky-top">
-  <span class="navbar-brand"><i class="bi bi-umbrella-fill me-2"></i>共享雨傘管理後台</span>
-  <div class="d-flex align-items-center gap-3">
-    <a href="{{ url_for('admin_logout') }}" class="btn btn-outline-light btn-sm">登出</a>
-  </div>
-</nav>
-
-{% if flash %}
-<div class="flash-msg alert alert-{{ flash.type }} alert-dismissible shadow fade show">
-  {{ flash.msg }}<button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-</div>
-{% endif %}
-
-<div class="container-lg py-4">
-
-  <div class="card section-card mb-4">
-    <div class="section-header header-a">Section A：校園雨傘地圖</div>
-    <div class="card-body">
-      <div class="row g-3">
-        {% for s in stations %}
-        <div class="col-sm-6 col-lg-4">
-          <div class="p-3 border rounded-3 bg-white">
-            <span class="fw-semibold">{{ s.name }}</span> : <span class="badge bg-success">{{ s.umbrella_count }} 把</span>
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-    </div>
-  </div>
-
-  <div class="card section-card mb-4">
-    <div class="section-header header-d">Section D：註冊審核清單 <span class="badge bg-white text-dark">{{ pending_users|length }} 筆待審核</span></div>
-    <div class="card-body p-0">
-      <table class="table table-hover mb-0 align-middle">
-        <thead class="table-light"><tr><th>姓名</th><th>系所</th><th>學生證</th><th>操作</th></tr></thead>
-        <tbody>
-          {% for u in pending_users %}
-          <tr>
-            <td>
-                {{ u.real_name }} 
-                {% if u.real_name in duplicate_names %}<span class="badge bg-danger ms-1">⚠️ 重複姓名</span>{% endif %}
-            </td>
-            <td>{{ u.department }}</td>
-            <td><a href="/{{ u.student_id_path }}" target="_blank" class="btn btn-sm btn-outline-secondary">查看照片</a></td>
-            <td>
-              <form method="post" action="{{ url_for('admin_verify') }}" class="d-inline">
-                <input type="hidden" name="user_id" value="{{ u.user_id }}"><input type="hidden" name="action" value="approve">
-                <button class="btn btn-success btn-sm">✅ 通過</button>
-              </form>
-              <form method="post" action="{{ url_for('admin_verify') }}" class="d-inline">
-                <input type="hidden" name="user_id" value="{{ u.user_id }}"><input type="hidden" name="action" value="reject">
-                <button class="btn btn-danger btn-sm">❌ 駁回</button>
-              </form>
-            </td>
-          </tr>
-          {% else %}
-          <tr><td colspan="4" class="text-center text-muted py-3">目前無待審核資料</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="card section-card mb-4">
-    <div class="section-header header-e">Section E：雨傘報修清單 <span class="badge bg-white text-dark">{{ pending_repairs|length }} 筆待處理</span></div>
-    <div class="card-body p-0">
-      <table class="table table-hover mb-0 align-middle">
-        <thead class="table-light"><tr><th>回報時間</th><th>站點</th><th>損壞照片</th><th>操作</th></tr></thead>
-        <tbody>
-          {% for r in pending_repairs %}
-          <tr>
-            <td>{{ r.report_time }}</td>
-            <td>{{ r.station }}</td>
-            <td><a href="/{{ r.photo_path }}" target="_blank" class="btn btn-sm btn-outline-secondary">查看照片</a></td>
-            <td>
-              <form method="post" action="{{ url_for('admin_repair_resolve') }}">
-                <input type="hidden" name="repair_id" value="{{ r.id }}">
-                <button class="btn btn-success btn-sm">✅ 標記已處理</button>
-              </form>
-            </td>
-          </tr>
-          {% else %}
-          <tr><td colspan="4" class="text-center text-muted py-3">目前無待處理報修</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="card section-card mb-4">
-    <div class="section-header header-b">Section B：全體使用者與信用管理</div>
-    <div class="card-body p-0">
-      <table class="table table-hover mb-0 align-middle">
-        <thead class="table-light"><tr><th>姓名</th><th>狀態</th><th>信用分</th><th>操作</th></tr></thead>
-        <tbody>
-          {% for u in users %}
-          <tr>
-            <td>{{ u.real_name or '未知' }}</td>
-            <td>{{ u.status }}</td>
-            <td>{{ u.credit }}</td>
-            <td>
-              <form method="post" action="{{ url_for('admin_credit') }}" class="d-inline">
-                <input type="hidden" name="user_id" value="{{ u.user_id }}"><input type="hidden" name="delta" value="-30"><button class="btn btn-danger btn-sm">扣 30</button>
-              </form>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-  </div>
-</div>
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
-"""
-
-# ─────────────────────────────────────────────────────────────────────────────
 # Dashboard Routes
 # ─────────────────────────────────────────────────────────────────────────────
 def admin_required(fn):
@@ -402,6 +241,36 @@ def admin_required(fn):
         return fn(*args, **kwargs)
     return wrapper
 
+def _build_init_data():
+    """首次載入頁面時傳給 JS 的初始資料"""
+    with get_conn() as conn:
+        stations = [dict(r) for r in conn.execute("SELECT * FROM stations ORDER BY id").fetchall()]
+        users    = conn.execute("SELECT status, credit FROM users").fetchall()
+
+    status_map = {}
+    credit_dist = {"high": 0, "mid": 0, "low": 0}
+    for u in users:
+        s = u["status"]
+        if s not in ("idle", "borrowing", "unregistered"):
+            s = "other"
+        status_map[s] = status_map.get(s, 0) + 1
+        c = u["credit"]
+        if c >= 80: credit_dist["high"] += 1
+        elif c >= 60: credit_dist["mid"] += 1
+        else: credit_dist["low"] += 1
+
+    return {
+        "stations":     stations,
+        "user_status":  status_map,
+        "credit_dist":  credit_dist,
+        "borrowing_count": status_map.get("borrowing", 0),
+        "total_available": sum(s["umbrella_count"] for s in stations if s["is_active"]),
+        "low_credit_count": credit_dist["low"],
+        "total_users": len(users),
+        "verified_users": 0,  # will be filled by /api/stats polling
+        "pending_repairs": 0,
+    }
+
 @app.route("/admin/login", methods=["GET", "POST"])
 def admin_login():
     error = None
@@ -410,7 +279,7 @@ def admin_login():
             session["admin_logged_in"] = True
             return redirect(url_for("admin_dashboard"))
         error = "密碼錯誤，請再試一次。"
-    return render_template_string(LOGIN_HTML, error=error)
+    return render_template("login.html", error=error)
 
 @app.route("/admin/logout")
 def admin_logout():
@@ -421,33 +290,156 @@ def admin_logout():
 @admin_required
 def admin_dashboard():
     with get_conn() as conn:
-        stations = conn.execute("SELECT * FROM stations ORDER BY id").fetchall()
-        users    = conn.execute("SELECT * FROM users ORDER BY real_name").fetchall()
-        pending_users = conn.execute("SELECT * FROM users WHERE is_verified=0 AND real_name IS NOT NULL").fetchall()
+        users           = conn.execute("SELECT * FROM users ORDER BY real_name").fetchall()
+        pending_users   = conn.execute("SELECT * FROM users WHERE is_verified=0 AND real_name IS NOT NULL").fetchall()
         pending_repairs = conn.execute("SELECT * FROM repairs WHERE status='pending' ORDER BY report_time DESC").fetchall()
-        
-        # 找重複姓名
-        name_counts = {}
-        for u in users:
-            if u["real_name"]: name_counts[u["real_name"]] = name_counts.get(u["real_name"], 0) + 1
-        duplicate_names = [name for name, count in name_counts.items() if count > 1]
+        borrowing_users = conn.execute("""
+            SELECT *, ROUND((julianday('now','localtime') - julianday(borrow_time)) * 24, 1) AS hours_elapsed
+            FROM users WHERE status='borrowing'
+        """).fetchall()
+        verified_users  = conn.execute("SELECT COUNT(*) FROM users WHERE is_verified=1").fetchone()[0]
 
-    flash = session.pop("flash", None)
-    
-    # 👇 1. 補上抓取現在時間的程式碼
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S") 
-    
-    return render_template_string(
-        DASHBOARD_HTML,
-        stations=stations, users=users, pending_users=pending_users, 
-        pending_repairs=pending_repairs, duplicate_names=duplicate_names, flash=flash,
-        now=now_str # 👇 2. 記得把 now 傳進網頁裡！
+    name_counts = {}
+    for u in users:
+        if u["real_name"]:
+            name_counts[u["real_name"]] = name_counts.get(u["real_name"], 0) + 1
+    duplicate_names = [n for n, c in name_counts.items() if c > 1]
+
+    borrowing_count  = sum(1 for u in users if u["status"] == "borrowing")
+    low_credit_count = sum(1 for u in users if u["credit"] < 60)
+
+    with get_conn() as conn:
+        total_available = conn.execute(
+            "SELECT COALESCE(SUM(umbrella_count),0) FROM stations WHERE is_active=1"
+        ).fetchone()[0]
+
+    flash     = session.pop("flash", None)
+    init_data = _build_init_data()
+
+    return render_template(
+        "dashboard.html",
+        users=users, pending_users=pending_users,
+        pending_repairs=pending_repairs, borrowing_users=borrowing_users,
+        duplicate_names=duplicate_names, flash=flash,
+        borrowing_count=borrowing_count, total_available=total_available,
+        low_credit_count=low_credit_count, verified_users=verified_users,
+        total_users=len(users), init_data=init_data,
     )
+
+# ── JSON API（前端輪詢用）──
+@app.route("/api/stats")
+@admin_required
+def api_stats():
+    with get_conn() as conn:
+        stations = [dict(r) for r in conn.execute("SELECT * FROM stations ORDER BY id").fetchall()]
+        users    = conn.execute("SELECT status, credit FROM users").fetchall()
+        pending_repairs = conn.execute("SELECT COUNT(*) FROM repairs WHERE status='pending'").fetchone()[0]
+        verified_users  = conn.execute("SELECT COUNT(*) FROM users WHERE is_verified=1").fetchone()[0]
+
+    status_map  = {}
+    credit_dist = {"high": 0, "mid": 0, "low": 0}
+    for u in users:
+        s = u["status"] if u["status"] in ("idle","borrowing","unregistered") else "other"
+        status_map[s] = status_map.get(s, 0) + 1
+        c = u["credit"]
+        if c >= 80: credit_dist["high"] += 1
+        elif c >= 60: credit_dist["mid"] += 1
+        else: credit_dist["low"] += 1
+
+    return jsonify({
+        "stations":        stations,
+        "user_status":     status_map,
+        "credit_dist":     credit_dist,
+        "borrowing_count": status_map.get("borrowing", 0),
+        "total_available": sum(s["umbrella_count"] for s in stations if s["is_active"]),
+        "low_credit_count":credit_dist["low"],
+        "pending_repairs": pending_repairs,
+        "total_users":     len(users),
+        "verified_users":  verified_users,
+    })
+
+@app.route("/api/stations")
+@admin_required
+def api_stations():
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM stations ORDER BY id").fetchall()
+    return jsonify([dict(r) for r in rows])
+
+# ── 站點 CRUD ──
+@app.route("/admin/stations/add", methods=["POST"])
+@admin_required
+def admin_station_add():
+    name    = request.form.get("name", "").strip()
+    max_cap = int(request.form.get("max_capacity", 10))
+    count   = int(request.form.get("umbrella_count", 0))
+    map_x   = float(request.form.get("map_x", 50))
+    map_y   = float(request.form.get("map_y", 50))
+    if name:
+        try:
+            with get_conn() as conn:
+                conn.execute(
+                    "INSERT INTO stations (name, umbrella_count, map_x, map_y, max_capacity) VALUES (?,?,?,?,?)",
+                    (name, min(count, max_cap), map_x, map_y, max_cap)
+                )
+            session["flash"] = {"type": "success", "msg": f"✅ 站點「{name}」已建立"}
+        except Exception:
+            session["flash"] = {"type": "danger", "msg": "站點名稱重複，請使用不同名稱"}
+    return redirect(url_for("admin_dashboard"))
+
+@app.route("/admin/stations/edit", methods=["POST"])
+@admin_required
+def admin_station_edit():
+    sid      = int(request.form.get("id"))
+    name     = request.form.get("name", "").strip()
+    max_cap  = int(request.form.get("max_capacity", 10))
+    is_active= 1 if request.form.get("is_active") else 0
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE stations SET name=?, max_capacity=?, is_active=? WHERE id=?",
+            (name, max_cap, is_active, sid)
+        )
+    session["flash"] = {"type": "success", "msg": f"✅ 站點資料已更新"}
+    return redirect(url_for("admin_dashboard"))
+
+@app.route("/admin/stations/delete", methods=["POST"])
+@admin_required
+def admin_station_delete():
+    sid = int(request.form.get("id"))
+    with get_conn() as conn:
+        conn.execute("DELETE FROM stations WHERE id=?", (sid,))
+    session["flash"] = {"type": "warning", "msg": "🗑️ 站點已刪除"}
+    return redirect(url_for("admin_dashboard"))
+
+@app.route("/admin/stations/adjust", methods=["POST"])
+@admin_required
+def admin_station_adjust():
+    sid   = int(request.form.get("id"))
+    delta = int(request.form.get("delta", 0))
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE stations SET umbrella_count = MAX(0, MIN(umbrella_count+?, max_capacity)) WHERE id=?",
+            (delta, sid)
+        )
+    session["flash"] = {"type": "success", "msg": f"✅ 庫存已調整 {delta:+d}"}
+    return redirect(url_for("admin_dashboard"))
+
+@app.route("/admin/stations/position", methods=["POST"])
+@admin_required
+def admin_station_position():
+    """地圖拖曳後儲存位置（AJAX）"""
+    data  = request.get_json(silent=True) or {}
+    sid   = int(data.get("id", 0))
+    map_x = float(data.get("map_x", 50))
+    map_y = float(data.get("map_y", 50))
+    with get_conn() as conn:
+        conn.execute("UPDATE stations SET map_x=?, map_y=? WHERE id=?", (map_x, map_y, sid))
+    return jsonify({"ok": True})
+
 @app.route("/admin/verify", methods=["POST"])
 @admin_required
 def admin_verify():
     user_id = request.form.get("user_id")
-    action = request.form.get("action")
+    action  = request.form.get("action")
     if action == "approve":
         with get_conn() as conn:
             conn.execute("UPDATE users SET is_verified=1 WHERE user_id=?", (user_id,))
@@ -469,10 +461,12 @@ def admin_repair_resolve():
 @app.route("/admin/credit", methods=["POST"])
 @admin_required
 def admin_credit():
-    user_id, delta = request.form.get("user_id"), int(request.form.get("delta", 0))
+    user_id = request.form.get("user_id")
+    delta   = int(request.form.get("delta", 0))
     with get_conn() as conn:
-        conn.execute("UPDATE users SET credit=MAX(0, credit + ?) WHERE user_id=?", (delta, user_id))
-    push(user_id, f"📋 信用分數異動通知：已扣除 {abs(delta)} 分。")
+        conn.execute("UPDATE users SET credit=MAX(0, MIN(100, credit+?)) WHERE user_id=?", (delta, user_id))
+    action = "獎勵" if delta > 0 else "扣除"
+    push(user_id, f"📋 信用分數異動通知：已{action} {abs(delta)} 分。")
     return redirect(url_for("admin_dashboard"))
 
 # 提供圖片靜態訪問

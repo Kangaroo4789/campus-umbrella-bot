@@ -1,0 +1,652 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>管理後台 — 校園共享雨傘</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --brand: #1a3c5e;
+      --brand-light: #2980b9;
+      --sidebar-w: 220px;
+    }
+    body { background: #f4f7fb; font-size: .92rem; }
+
+    /* Navbar */
+    .top-navbar {
+      background: var(--brand);
+      height: 56px;
+      position: fixed; top:0; left:0; right:0; z-index:1030;
+      display:flex; align-items:center; padding:0 1.25rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,.25);
+    }
+    .top-navbar .brand { color:#fff; font-weight:700; font-size:1rem; display:flex; align-items:center; gap:.5rem; }
+    .top-navbar .right  { margin-left:auto; display:flex; align-items:center; gap:1rem; }
+    .top-navbar .right .live-dot { width:8px;height:8px;border-radius:50%;background:#2ecc71;
+      box-shadow:0 0 0 0 rgba(46,204,113,.5); animation: pulse 2s infinite; display:inline-block; }
+    @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(46,204,113,.5)} 70%{box-shadow:0 0 0 8px rgba(46,204,113,0)} 100%{box-shadow:0 0 0 0 rgba(46,204,113,0)} }
+
+    /* Sidebar */
+    .sidebar {
+      position:fixed; top:56px; left:0; bottom:0; width:var(--sidebar-w);
+      background:#fff; border-right:1px solid #e8edf2;
+      overflow-y:auto; z-index:1020; padding-top:.5rem;
+    }
+    .sidebar .nav-link {
+      color:#5a6a7e; padding:.55rem 1.25rem; border-radius:0 2rem 2rem 0;
+      margin-right:.75rem; display:flex; align-items:center; gap:.6rem;
+      transition: all .15s;
+    }
+    .sidebar .nav-link:hover, .sidebar .nav-link.active {
+      background:#e8f4fd; color:var(--brand-light); font-weight:600;
+    }
+    .sidebar .nav-section { font-size:.72rem; font-weight:700; color:#aab; letter-spacing:.05em;
+      padding:.75rem 1.25rem .25rem; text-transform:uppercase; }
+
+    /* Main content */
+    .main-content { margin-left:var(--sidebar-w); margin-top:56px; padding:1.5rem; min-height:calc(100vh - 56px); }
+
+    /* Stat Cards */
+    .stat-card {
+      background:#fff; border-radius:.75rem; padding:1.1rem 1.25rem;
+      box-shadow:0 1px 6px rgba(0,0,0,.07); border-left:4px solid transparent;
+      display:flex; align-items:center; gap:1rem; height:100%;
+    }
+    .stat-card .icon { width:46px;height:46px;border-radius:.6rem;display:flex;align-items:center;justify-content:center;font-size:1.4rem;flex-shrink:0; }
+    .stat-card .value { font-size:1.8rem;font-weight:700;line-height:1; }
+    .stat-card .label { color:#7a8a9a;font-size:.78rem;margin-top:.2rem; }
+    .stat-card.blue  { border-color:#2980b9; } .stat-card.blue  .icon { background:#e8f4fd;color:#2980b9; }
+    .stat-card.green { border-color:#27ae60; } .stat-card.green .icon { background:#eafaf1;color:#27ae60; }
+    .stat-card.red   { border-color:#e74c3c; } .stat-card.red   .icon { background:#fdedec;color:#e74c3c; }
+    .stat-card.orange{ border-color:#e67e22; } .stat-card.orange .icon { background:#fef5e7;color:#e67e22; }
+    .stat-card.purple{ border-color:#8e44ad; } .stat-card.purple .icon { background:#f5eef8;color:#8e44ad; }
+    .stat-card.teal  { border-color:#16a085; } .stat-card.teal  .icon { background:#e8f8f5;color:#16a085; }
+
+    /* Section cards */
+    .section-card { background:#fff; border-radius:.75rem; box-shadow:0 1px 6px rgba(0,0,0,.07); overflow:hidden; }
+    .section-header { padding:.85rem 1.25rem; font-weight:700; font-size:.9rem; display:flex; align-items:center; gap:.5rem; color:#fff; }
+    .sh-blue   { background:linear-gradient(90deg,#154776,#2980b9); }
+    .sh-green  { background:linear-gradient(90deg,#1a6e3c,#27ae60); }
+    .sh-purple { background:linear-gradient(90deg,#6c3483,#8e44ad); }
+    .sh-red    { background:linear-gradient(90deg,#922b21,#e74c3c); }
+    .sh-orange { background:linear-gradient(90deg,#935116,#e67e22); }
+    .sh-teal   { background:linear-gradient(90deg,#0e6655,#16a085); }
+
+    /* Map */
+    #map-wrapper { position:relative; background:#d4edda; border-radius:.5rem;
+      overflow:hidden; min-height:420px; }
+    .campus-svg { position:absolute; inset:0; width:100%; height:100%; }
+    #map-container { position:absolute; inset:0; }
+    .station-marker {
+      position:absolute; transform:translate(-50%,-50%);
+      cursor:pointer; user-select:none; z-index:10;
+      text-align:center; width:80px;
+    }
+    .marker-dot {
+      width:38px;height:38px;border-radius:50%;
+      display:flex;align-items:center;justify-content:center;
+      color:#fff;font-size:1rem;margin:0 auto;
+      box-shadow:0 2px 8px rgba(0,0,0,.3);
+      border:3px solid rgba(255,255,255,.8);
+      transition:transform .15s;
+    }
+    .station-marker:hover .marker-dot { transform:scale(1.15); }
+    .marker-label {
+      margin-top:4px; font-size:.7rem; font-weight:600;
+      color:#2c3e50; line-height:1.3; text-shadow:0 0 4px #fff,0 0 4px #fff;
+    }
+    #map-mode-hint { display:none; background:rgba(230,126,34,.9); color:#fff;
+      padding:.4rem .75rem; border-radius:.4rem; font-size:.8rem; text-align:center; margin-bottom:.5rem; }
+
+    /* Table */
+    .table th { font-weight:600; font-size:.8rem; color:#6c757d; text-transform:uppercase; letter-spacing:.03em; }
+    .table td { vertical-align:middle; }
+    .badge-status { font-size:.72rem; padding:.3em .6em; }
+
+    /* Flash */
+    .flash-toast { position:fixed;bottom:1.5rem;right:1.5rem;z-index:9999;min-width:260px; }
+
+    /* Charts container */
+    .chart-box { position:relative; height:220px; }
+
+    @media(max-width:768px){
+      .sidebar { transform:translateX(-100%); }
+      .main-content { margin-left:0; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ===== Navbar ===== -->
+<div class="top-navbar">
+  <div class="brand"><i class="bi bi-umbrella-fill"></i> 校園共享雨傘 · 管理後台</div>
+  <div class="right">
+    <span class="live-dot" title="即時更新中"></span>
+    <small class="text-white-50" id="last-update">--</small>
+    <a href="{{ url_for('admin_logout') }}" class="btn btn-outline-light btn-sm">
+      <i class="bi bi-box-arrow-right"></i> 登出
+    </a>
+  </div>
+</div>
+
+<!-- ===== Sidebar ===== -->
+<nav class="sidebar">
+  <div class="nav-section">總覽</div>
+  <a href="#section-stats"   class="nav-link"><i class="bi bi-speedometer2"></i> 即時數據</a>
+  <a href="#section-charts"  class="nav-link"><i class="bi bi-bar-chart-fill"></i> 圖表分析</a>
+  <div class="nav-section">傘站管理</div>
+  <a href="#section-map"     class="nav-link"><i class="bi bi-map-fill"></i> 傘站地圖</a>
+  <a href="#section-stations" class="nav-link"><i class="bi bi-geo-alt-fill"></i> 站點列表</a>
+  <div class="nav-section">用戶管理</div>
+  <a href="#section-borrow"  class="nav-link"><i class="bi bi-clock-fill"></i> 借用中清單</a>
+  <a href="#section-verify"  class="nav-link"><i class="bi bi-person-check-fill"></i> 待審核 <span class="badge bg-danger ms-auto">{{ pending_users|length }}</span></a>
+  <a href="#section-users"   class="nav-link"><i class="bi bi-people-fill"></i> 全體用戶</a>
+  <div class="nav-section">維修</div>
+  <a href="#section-repairs" class="nav-link"><i class="bi bi-wrench-adjustable"></i> 報修清單 <span class="badge bg-warning text-dark ms-auto">{{ pending_repairs|length }}</span></a>
+</nav>
+
+<!-- ===== Main Content ===== -->
+<div class="main-content">
+
+  {% if flash %}
+  <div class="flash-toast alert alert-{{ flash.type }} alert-dismissible shadow">
+    {{ flash.msg }}
+    <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+  </div>
+  {% endif %}
+
+  <!-- === Section: Stats Cards === -->
+  <div id="section-stats" class="mb-4">
+    <div class="row g-3">
+      <div class="col-6 col-md-4 col-xl-2">
+        <div class="stat-card blue">
+          <div class="icon"><i class="bi bi-clock-history"></i></div>
+          <div><div class="value" id="card-borrowing">{{ borrowing_count }}</div><div class="label">借用中</div></div>
+        </div>
+      </div>
+      <div class="col-6 col-md-4 col-xl-2">
+        <div class="stat-card green">
+          <div class="icon"><i class="bi bi-umbrella"></i></div>
+          <div><div class="value" id="card-available">{{ total_available }}</div><div class="label">可借總數</div></div>
+        </div>
+      </div>
+      <div class="col-6 col-md-4 col-xl-2">
+        <div class="stat-card red">
+          <div class="icon"><i class="bi bi-exclamation-triangle"></i></div>
+          <div><div class="value" id="card-low-credit">{{ low_credit_count }}</div><div class="label">低信用用戶</div></div>
+        </div>
+      </div>
+      <div class="col-6 col-md-4 col-xl-2">
+        <div class="stat-card orange">
+          <div class="icon"><i class="bi bi-wrench"></i></div>
+          <div><div class="value" id="card-repairs">{{ pending_repairs|length }}</div><div class="label">待處理報修</div></div>
+        </div>
+      </div>
+      <div class="col-6 col-md-4 col-xl-2">
+        <div class="stat-card purple">
+          <div class="icon"><i class="bi bi-person-check"></i></div>
+          <div><div class="value" id="card-verified">{{ verified_users }}</div><div class="label">已驗證用戶</div></div>
+        </div>
+      </div>
+      <div class="col-6 col-md-4 col-xl-2">
+        <div class="stat-card teal">
+          <div class="icon"><i class="bi bi-people"></i></div>
+          <div><div class="value" id="card-users">{{ total_users }}</div><div class="label">總用戶數</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- === Section: Charts === -->
+  <div id="section-charts" class="row g-3 mb-4">
+    <div class="col-md-5">
+      <div class="section-card h-100">
+        <div class="section-header sh-blue"><i class="bi bi-bar-chart-fill"></i> 各站點庫存</div>
+        <div class="p-3"><div class="chart-box"><canvas id="chartStationBar"></canvas></div></div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="section-card h-100">
+        <div class="section-header sh-green"><i class="bi bi-pie-chart-fill"></i> 用戶狀態分布</div>
+        <div class="p-3"><div class="chart-box"><canvas id="chartUserPie"></canvas></div></div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="section-card h-100">
+        <div class="section-header sh-purple"><i class="bi bi-pie-chart"></i> 信用分分布</div>
+        <div class="p-3"><div class="chart-box"><canvas id="chartCreditPie"></canvas></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- === Section: Map === -->
+  <div id="section-map" class="section-card mb-4">
+    <div class="section-header sh-teal">
+      <i class="bi bi-map-fill"></i> 台東大學傘站平面地圖
+      <div class="ms-auto d-flex gap-2">
+        <div id="map-mode-hint" class="me-2">拖曳標記可調整位置</div>
+        <button id="btn-map-mode" class="btn btn-outline-light btn-sm" onclick="toggleMapMode()">
+          <i class="bi bi-arrows-move me-1"></i>調整位置
+        </button>
+        <button class="btn btn-success btn-sm" onclick="openAddModal()">
+          <i class="bi bi-plus-lg me-1"></i>新增站點
+        </button>
+      </div>
+    </div>
+    <div class="p-3">
+      <div id="map-wrapper">
+        <!-- 台東大學簡易校園示意圖 SVG -->
+        <svg class="campus-svg" viewBox="0 0 1000 600" xmlns="http://www.w3.org/2000/svg">
+          <!-- 草地底色 -->
+          <rect width="1000" height="600" fill="#c8e6c9"/>
+          <!-- 校園邊界 -->
+          <rect x="30" y="30" width="940" height="540" fill="none" stroke="#4caf50" stroke-width="3" stroke-dasharray="10,5" rx="8"/>
+
+          <!-- 道路 -->
+          <rect x="30" y="280" width="940" height="30" fill="#eceff1" opacity=".8"/>
+          <rect x="460" y="30" width="30" height="540" fill="#eceff1" opacity=".8"/>
+
+          <!-- 行政大樓 -->
+          <rect x="50" y="50" width="180" height="120" rx="6" fill="#90a4ae"/>
+          <text x="140" y="118" text-anchor="middle" font-size="14" fill="#fff" font-weight="bold">行政大樓</text>
+
+          <!-- 圖書館 -->
+          <rect x="260" y="50" width="180" height="110" rx="6" fill="#5c8fa8"/>
+          <text x="350" y="113" text-anchor="middle" font-size="14" fill="#fff" font-weight="bold">圖書館</text>
+          <text x="350" y="130" text-anchor="middle" font-size="11" fill="#cfe8f5">Library</text>
+
+          <!-- 理工學院 -->
+          <rect x="510" y="50" width="200" height="110" rx="6" fill="#6d8b74"/>
+          <text x="610" y="110" text-anchor="middle" font-size="14" fill="#fff" font-weight="bold">理工學院</text>
+
+          <!-- 文學院 -->
+          <rect x="740" y="50" width="200" height="110" rx="6" fill="#8d6e63"/>
+          <text x="840" y="110" text-anchor="middle" font-size="14" fill="#fff" font-weight="bold">文學院</text>
+
+          <!-- 學生活動中心 -->
+          <rect x="50" y="320" width="220" height="120" rx="6" fill="#7e57c2"/>
+          <text x="160" y="383" text-anchor="middle" font-size="13" fill="#fff" font-weight="bold">學生活動中心</text>
+
+          <!-- 體育館 -->
+          <rect x="300" y="320" width="140" height="120" rx="6" fill="#26a69a"/>
+          <text x="370" y="383" text-anchor="middle" font-size="13" fill="#fff" font-weight="bold">體育館</text>
+
+          <!-- 教學大樓 -->
+          <rect x="510" y="320" width="200" height="120" rx="6" fill="#78909c"/>
+          <text x="610" y="383" text-anchor="middle" font-size="13" fill="#fff" font-weight="bold">教學大樓</text>
+
+          <!-- 男生宿舍 -->
+          <rect x="50" y="470" width="180" height="80" rx="6" fill="#ab8b6a"/>
+          <text x="140" y="515" text-anchor="middle" font-size="13" fill="#fff" font-weight="bold">男生宿舍</text>
+
+          <!-- 女生宿舍 -->
+          <rect x="260" y="470" width="180" height="80" rx="6" fill="#c47ea4"/>
+          <text x="350" y="515" text-anchor="middle" font-size="13" fill="#fff" font-weight="bold">女生宿舍</text>
+
+          <!-- 餐廳 -->
+          <rect x="740" y="320" width="200" height="120" rx="6" fill="#ef9a9a"/>
+          <text x="840" y="383" text-anchor="middle" font-size="13" fill="#fff" font-weight="bold">學生餐廳</text>
+
+          <!-- 停車場 -->
+          <rect x="510" y="460" width="430" height="100" rx="6" fill="#bdbdbd"/>
+          <text x="725" y="515" text-anchor="middle" font-size="13" fill="#fff" font-weight="bold">停車場</text>
+
+          <!-- 指北針 -->
+          <circle cx="950" cy="50" r="20" fill="rgba(255,255,255,.7)"/>
+          <text x="950" y="44" text-anchor="middle" font-size="10" font-weight="bold" fill="#e74c3c">N</text>
+          <polygon points="950,28 945,54 950,50 955,54" fill="#e74c3c"/>
+
+          <!-- 比例尺標記 -->
+          <line x1="50" y1="585" x2="150" y2="585" stroke="#555" stroke-width="2"/>
+          <line x1="50" y1="580" x2="50" y2="590" stroke="#555" stroke-width="2"/>
+          <line x1="150" y1="580" x2="150" y2="590" stroke="#555" stroke-width="2"/>
+          <text x="100" y="598" text-anchor="middle" font-size="10" fill="#555">100m</text>
+        </svg>
+
+        <!-- 傘站 Markers 由 JS 動態渲染 -->
+        <div id="map-container"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- === Section: Station List === -->
+  <div id="section-stations" class="section-card mb-4">
+    <div class="section-header sh-teal">
+      <i class="bi bi-geo-alt-fill"></i> 站點庫存管理
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead class="table-light">
+          <tr><th>站點名稱</th><th style="min-width:200px">庫存狀況</th><th>狀態</th><th>操作</th></tr>
+        </thead>
+        <tbody id="station-tbody">
+          <tr><td colspan="4" class="text-center text-muted py-3">載入中…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- === Section C: 借用中清單 === -->
+  <div id="section-borrow" class="section-card mb-4">
+    <div class="section-header sh-blue">
+      <i class="bi bi-clock-history"></i> 借用中清單
+      <span class="badge bg-white text-dark ms-2">{{ borrowing_users|length }} 人</span>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead class="table-light">
+          <tr><th>姓名</th><th>傘號</th><th>借出站點</th><th>借出時間</th><th>已借時長</th></tr>
+        </thead>
+        <tbody>
+          {% for u in borrowing_users %}
+          <tr>
+            <td>{{ u.real_name or '未知' }}</td>
+            <td><span class="badge bg-primary">#{{ u.umbrella_id }}</span></td>
+            <td>{{ u.borrow_station or '—' }}</td>
+            <td>{{ u.borrow_time }}</td>
+            <td>
+              {% if u.hours_elapsed is not none %}
+                {% if u.hours_elapsed > 72 %}
+                  <span class="badge bg-danger">{{ "%.1f"|format(u.hours_elapsed) }}h ⚠️</span>
+                {% elif u.hours_elapsed > 24 %}
+                  <span class="badge bg-warning text-dark">{{ "%.1f"|format(u.hours_elapsed) }}h</span>
+                {% else %}
+                  <span class="badge bg-success">{{ "%.1f"|format(u.hours_elapsed) }}h</span>
+                {% endif %}
+              {% else %}—{% endif %}
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="5" class="text-center text-muted py-3">目前沒有人在借傘</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- === Section D: 待審核 === -->
+  <div id="section-verify" class="section-card mb-4">
+    <div class="section-header sh-purple">
+      <i class="bi bi-person-check-fill"></i> 註冊審核清單
+      <span class="badge bg-white text-dark ms-2">{{ pending_users|length }} 筆待審核</span>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead class="table-light">
+          <tr><th>姓名</th><th>系所</th><th>學生證</th><th>操作</th></tr>
+        </thead>
+        <tbody>
+          {% for u in pending_users %}
+          <tr>
+            <td>
+              {{ u.real_name }}
+              {% if u.real_name in duplicate_names %}
+              <span class="badge bg-danger ms-1">⚠️ 重複姓名</span>
+              {% endif %}
+            </td>
+            <td>{{ u.department }}</td>
+            <td>
+              <a href="/uploads/{{ u.student_id_path.split('/')[-1] if u.student_id_path else '' }}" target="_blank" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-image"></i> 查看
+              </a>
+            </td>
+            <td class="d-flex gap-2">
+              <form method="post" action="{{ url_for('admin_verify') }}">
+                <input type="hidden" name="user_id" value="{{ u.user_id }}">
+                <input type="hidden" name="action" value="approve">
+                <button class="btn btn-success btn-sm"><i class="bi bi-check-lg"></i> 通過</button>
+              </form>
+              <form method="post" action="{{ url_for('admin_verify') }}">
+                <input type="hidden" name="user_id" value="{{ u.user_id }}">
+                <input type="hidden" name="action" value="reject">
+                <button class="btn btn-danger btn-sm"><i class="bi bi-x-lg"></i> 駁回</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" class="text-center text-muted py-3">目前無待審核資料</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- === Section E: 報修清單 === -->
+  <div id="section-repairs" class="section-card mb-4">
+    <div class="section-header sh-red">
+      <i class="bi bi-wrench-adjustable"></i> 雨傘報修清單
+      <span class="badge bg-white text-dark ms-2">{{ pending_repairs|length }} 筆待處理</span>
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead class="table-light">
+          <tr><th>回報時間</th><th>站點</th><th>損壞照片</th><th>操作</th></tr>
+        </thead>
+        <tbody>
+          {% for r in pending_repairs %}
+          <tr>
+            <td>{{ r.report_time }}</td>
+            <td>{{ r.station }}</td>
+            <td>
+              <a href="/uploads/{{ r.photo_path.split('/')[-1] if r.photo_path else '' }}" target="_blank" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-camera"></i> 查看
+              </a>
+            </td>
+            <td>
+              <form method="post" action="{{ url_for('admin_repair_resolve') }}">
+                <input type="hidden" name="repair_id" value="{{ r.id }}">
+                <button class="btn btn-success btn-sm"><i class="bi bi-check-lg"></i> 標記已處理</button>
+              </form>
+            </td>
+          </tr>
+          {% else %}
+          <tr><td colspan="4" class="text-center text-muted py-3">目前無待處理報修</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- === Section B: 全體用戶 === -->
+  <div id="section-users" class="section-card mb-4">
+    <div class="section-header sh-orange">
+      <i class="bi bi-people-fill"></i> 全體使用者與信用管理
+    </div>
+    <div class="table-responsive">
+      <table class="table table-hover mb-0">
+        <thead class="table-light">
+          <tr><th>姓名</th><th>系所</th><th>狀態</th><th>信用分</th><th>操作</th></tr>
+        </thead>
+        <tbody>
+          {% for u in users %}
+          <tr>
+            <td>{{ u.real_name or '未知' }}</td>
+            <td>{{ u.department or '—' }}</td>
+            <td>
+              <span class="badge badge-status" style="
+                background: {%- if u.status == 'idle' %}#27ae60
+                {%- elif u.status == 'borrowing' %}#2980b9
+                {%- elif u.status == 'unregistered' %}#95a5a6
+                {%- else %}#f39c12{%- endif %}">
+                {{ u.status }}
+              </span>
+            </td>
+            <td>
+              <div class="d-flex align-items-center gap-2">
+                <span class="fw-bold {% if u.credit < 60 %}text-danger{% elif u.credit < 80 %}text-warning{% else %}text-success{% endif %}">
+                  {{ u.credit }}
+                </span>
+                <div class="progress flex-grow-1" style="height:6px;min-width:60px">
+                  <div class="progress-bar {% if u.credit < 60 %}bg-danger{% elif u.credit < 80 %}bg-warning{% else %}bg-success{% endif %}"
+                       style="width:{{ u.credit }}%"></div>
+                </div>
+              </div>
+            </td>
+            <td>
+              <div class="d-flex gap-1">
+                <form method="post" action="{{ url_for('admin_credit') }}" class="d-inline">
+                  <input type="hidden" name="user_id" value="{{ u.user_id }}">
+                  <input type="hidden" name="delta" value="5">
+                  <button class="btn btn-success btn-sm">+5</button>
+                </form>
+                <form method="post" action="{{ url_for('admin_credit') }}" class="d-inline">
+                  <input type="hidden" name="user_id" value="{{ u.user_id }}">
+                  <input type="hidden" name="delta" value="-30">
+                  <button class="btn btn-danger btn-sm">-30</button>
+                </form>
+              </div>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div><!-- /main-content -->
+
+
+<!-- ===== Modal: 站點詳情 ===== -->
+<div class="modal fade" id="stationDetailModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header" style="background:var(--brand);color:#fff">
+        <h5 class="modal-title"><i class="bi bi-geo-alt-fill me-2"></i><span id="modal-station-name"></span></h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="row g-3 text-center">
+          <div class="col-4">
+            <div class="text-muted small">可用雨傘</div>
+            <div class="fs-3 fw-bold text-success" id="modal-station-count">—</div>
+          </div>
+          <div class="col-4">
+            <div class="text-muted small">最大容量</div>
+            <div class="fs-3 fw-bold" id="modal-station-max">—</div>
+          </div>
+          <div class="col-4">
+            <div class="text-muted small">狀態</div>
+            <div class="fs-6 fw-bold mt-2" id="modal-station-status">—</div>
+          </div>
+        </div>
+        <hr>
+        <form method="post" action="{{ url_for('admin_station_adjust') }}" class="d-flex gap-2 align-items-end">
+          <input type="hidden" name="id" id="adj-station-id">
+          <div class="flex-grow-1">
+            <label class="form-label small mb-1">手動調整庫存</label>
+            <input type="number" name="delta" class="form-control" placeholder="例：+5 或 -2" required>
+          </div>
+          <button type="submit" class="btn btn-primary">調整</button>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <input type="hidden" id="modal-edit-id">
+        <button class="btn btn-warning" onclick="openEditModal()"><i class="bi bi-pencil me-1"></i>編輯站點</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">關閉</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Modal: 新增站點 ===== -->
+<div class="modal fade" id="addStationModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-plus-circle me-2"></i>新增傘站</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form id="add-station-form" method="post" action="{{ url_for('admin_station_add') }}">
+        <div class="modal-body row g-3">
+          <div class="col-12">
+            <label class="form-label">站點名稱</label>
+            <input type="text" name="name" class="form-control" placeholder="例：圖書館側門" required>
+          </div>
+          <div class="col-6">
+            <label class="form-label">最大容量</label>
+            <input type="number" name="max_capacity" class="form-control" value="10" min="1" required>
+          </div>
+          <div class="col-6">
+            <label class="form-label">初始雨傘數</label>
+            <input type="number" name="umbrella_count" class="form-control" value="0" min="0" required>
+          </div>
+          <div class="col-6">
+            <label class="form-label">地圖位置 X (%)</label>
+            <input type="number" name="map_x" class="form-control" value="50" min="0" max="100" step="0.1">
+          </div>
+          <div class="col-6">
+            <label class="form-label">地圖位置 Y (%)</label>
+            <input type="number" name="map_y" class="form-control" value="50" min="0" max="100" step="0.1">
+          </div>
+          <div class="col-12 text-muted small">
+            <i class="bi bi-info-circle me-1"></i>建立後可在地圖上拖曳調整位置
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-success"><i class="bi bi-check-lg me-1"></i>建立站點</button>
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ===== Modal: 編輯站點 ===== -->
+<div class="modal fade" id="editStationModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-pencil me-2"></i>編輯站點</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <form method="post" action="{{ url_for('admin_station_edit') }}">
+        <input type="hidden" name="id" id="edit-id">
+        <div class="modal-body row g-3">
+          <div class="col-12">
+            <label class="form-label">站點名稱</label>
+            <input type="text" name="name" id="edit-name" class="form-control" required>
+          </div>
+          <div class="col-6">
+            <label class="form-label">最大容量</label>
+            <input type="number" name="max_capacity" id="edit-max" class="form-control" min="1" required>
+          </div>
+          <div class="col-6 d-flex align-items-end">
+            <div class="form-check mb-2">
+              <input type="checkbox" name="is_active" id="edit-active" class="form-check-input" value="1">
+              <label class="form-check-label" for="edit-active">站點啟用</label>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer justify-content-between">
+          <button type="submit" formaction="{{ url_for('admin_station_delete') }}" class="btn btn-outline-danger btn-sm"
+            onclick="return confirm('確定要刪除此站點？此操作無法還原。')">
+            <i class="bi bi-trash me-1"></i>刪除站點
+          </button>
+          <div class="d-flex gap-2">
+            <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>儲存變更</button>
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">取消</button>
+          </div>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+<script>
+  // 即時更新時間戳
+  function updateTimestamp() {
+    const el = document.getElementById('last-update');
+    if (el) el.textContent = new Date().toLocaleTimeString('zh-TW');
+  }
+  setInterval(updateTimestamp, 1000);
+
+  // 初始資料（避免首次載入空白）
+  window.INIT_DATA = {{ init_data | tojson }};
+</script>
+</body>
+</html>
