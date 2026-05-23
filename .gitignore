@@ -1,0 +1,21 @@
+# 敏感設定
+.env
+.env.txt
+
+# 資料庫（含使用者個資）
+*.db
+
+# 使用者上傳照片
+uploads/
+photos/
+
+# ML 模型（大型二進位檔）
+*.pt
+
+# 執行檔
+ngrok.exe
+
+# Python 快取
+__pycache__/
+*.pyc
+*.pyo
