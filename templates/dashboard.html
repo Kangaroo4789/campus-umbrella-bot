@@ -389,7 +389,7 @@
             </td>
             <td>{{ u.department }}</td>
             <td>
-              <a href="/uploads/{{ u.student_id_path.split('/')[-1] if u.student_id_path else '' }}" target="_blank" class="btn btn-sm btn-outline-secondary">
+              <a href="/uploads/{{ u.student_id_path.replace('\\', '/').split('/')[-1] if u.student_id_path else '' }}" target="_blank" class="btn btn-sm btn-outline-secondary">
                 <i class="bi bi-image"></i> 查看
               </a>
             </td>
@@ -431,7 +431,7 @@
             <td>{{ r.report_time }}</td>
             <td>{{ r.station }}</td>
             <td>
-              <a href="/uploads/{{ r.photo_path.split('/')[-1] if r.photo_path else '' }}" target="_blank" class="btn btn-sm btn-outline-secondary">
+              <a href="/uploads/{{ r.photo_path.replace('\\', '/').split('/')[-1] if r.photo_path else '' }}" target="_blank" class="btn btn-sm btn-outline-secondary">
                 <i class="bi bi-camera"></i> 查看
               </a>
             </td>

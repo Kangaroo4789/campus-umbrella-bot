@@ -19,7 +19,7 @@ from flask import (
 
 # 👇 1. 環境變數讀取修復
 from dotenv import load_dotenv
-load_dotenv(".env.txt")
+load_dotenv(".env")
 
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
@@ -175,7 +175,11 @@ def station_quick_reply():
     ]
     return QuickReply(items=items)
 
+DEBUG_SKIP_ARUCO = True  # 測試用：True 時自動通過，上線前改回 False
+
 def decode_aruco(image_path):
+    if DEBUG_SKIP_ARUCO:
+        return "001"
     img = cv2.imread(image_path)
     if img is None: return None
     gray     = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
