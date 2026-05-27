@@ -189,8 +189,8 @@ def decode_aruco(image_path):
 def verify_return_image(image_path, user_id, return_station):
     try:
         from ultralytics import YOLO
-        model   = YOLO("yolov8n.pt")
-        results = model(image_path)
+        model   = YOLO("runs/detect/umbrella_custom/weights/best.pt")
+        results = model(image_path, conf=0.25)
         umbrella_detected = any("umbrella" in model.names[int(c)].lower() for r in results for c in r.boxes.cls.tolist())
         if umbrella_detected:
             adjust_station_count(return_station, +1)
